@@ -16,7 +16,7 @@ esphome:
       - lambda: |-
           ESP_LOGD("on_boot", "restoring state");
           auto now = id(homeassistant_time).now();
-          int hours = std::min(static_cast<int>(now.hour), static_cast<int>(id(hours_of_light_required).state));
+          int hours = std::min(static_cast<int>(now.hour), static_cast<int>(id(ha_hours_of_light_required).state));
           auto call = id(hours_of_light_elapsed).make_call();
           call.set_value(hours);
           call.perform();
@@ -39,8 +39,8 @@ ota:
 improv_serial:
 
 wifi:
-  # Set up a wifi access point
-  ap: {}
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
 
 # In combination with the `ap` this allows the user
 # to provision wifi credentials to the device via WiFi AP.
@@ -52,11 +52,16 @@ dashboard_import:
 
 # Sets up Bluetooth LE (Only on ESP32) to allow the user
 # to provision wifi credentials to the device.
-esp32_improv:
-  authorizer: none
+#esp32_improv:
+#  authorizer: none
 
 # To have a "next url" for improv serial
 web_server:
+
+http_request:
+  useragent: esphome/device
+  timeout: 10s
+  id: http_request_data
 
 # Example configuration entry
 switch:
@@ -72,13 +77,6 @@ switch:
     pin:
       number: 19
       inverted: true
-
-# Example configuration entry
-sensor:
-  - platform: homeassistant
-    name: "Growing light hours"
-    entity_id: input_number.growing_lights_hours
-    id: hours_of_light_required
 
 number:
   - platform: template
@@ -116,12 +114,12 @@ time:
         then:
            - logger.log: 
               format: "Minute ticker, light state: %d, mat state: %d, hours of light: %d, hours required: %df"
-              args: ['id(growing_light).state', 'id(heating_mat).state',  'static_cast<int>(id(hours_of_light_elapsed).state)', 'static_cast<int>(id(hours_of_light_required).state)' ]
+              args: ['id(growing_light).state', 'id(heating_mat).state',  'static_cast<int>(id(hours_of_light_elapsed).state)', 'static_cast<int>(id(ha_hours_of_light_required).state)' ]
            - if:
               condition:
                 and:
                  - switch.is_off: growing_light
-                 - lambda: 'return id(hours_of_light_elapsed).state < id(hours_of_light_required).state;'
+                 - lambda: 'return id(hours_of_light_elapsed).state < id(ha_hours_of_light_required).state;'
               then:
                 - switch.turn_on: growing_light
                 - switch.turn_off: heating_mat
@@ -129,7 +127,7 @@ time:
               condition:
                 and:
                  - switch.is_off: heating_mat
-                 - lambda: 'return id(hours_of_light_elapsed).state > id(hours_of_light_required).state;'
+                 - lambda: 'return id(hours_of_light_elapsed).state > id(ha_hours_of_light_required).state;'
               then:
                 - switch.turn_off: growing_light
                 - switch.turn_on: heating_mat
@@ -139,7 +137,7 @@ time:
         then:
           - logger.log: 
               format: "Hour ticker, light state: %d, mat state: %d, hours of light: %d, hours required: %df"
-              args: [ 'id(growing_light).state', 'id(heating_mat).state',  'static_cast<int>(id(hours_of_light_elapsed).state)', 'static_cast<int>(id(hours_of_light_required).state)' ] 
+              args: [ 'id(growing_light).state', 'id(heating_mat).state',  'static_cast<int>(id(hours_of_light_elapsed).state)', 'static_cast<int>(id(ha_hours_of_light_required).state)' ] 
           - if:
               condition:
                 switch.is_on: growing_light
@@ -147,3 +145,121 @@ time:
                 # Every hour reset the light hours to 0.
                 - number.increment:
                     id: hours_of_light_elapsed
+
+button:
+  - platform: template
+    name: bli blu
+    id: test2
+    on_press:
+      - logger.log: "Button test pressed"
+      - http_request.get:
+          url: https://esphome.io
+          verify_ssl: false
+          on_response:
+            then:
+              - logger.log:
+                  format: "Response status: %d, Duration: %u ms"
+                  args:
+                    - status_code
+                    - duration_ms
+                  
+  - platform: template
+    name: Gemini request
+    id: gemini
+    
+    # Optional variables:
+    icon: "mdi:emoticon-outline"
+    on_press:
+      - logger.log: "Button pressed"
+      - http_request.send:
+          method: POST
+          url: https://us-central1-aiplatform.googleapis.com/v1/projects/fcrisciani-cr-gpu/locations/us-central1/publishers/google/models/gemini-1.0-pro-002:generateContent
+          verify_ssl: false
+          headers:
+            Content-Type: application/json
+            Authorization: !lambda |-
+                return ((std::string) "Bearer " + id(ha_token).state).c_str();
+            content-length: 60
+            body: !lambda |-
+                return "{'contents':[{'role': 'user', 'parts': [{'text': 'hello'}]}]}";
+          # body: !lambda |-
+          #    std::string request_string = "{\n"
+          #     "    \"contents\": [\n"
+          #     "        {\n"
+          #     "            \"role\": \"user\",\n"
+          #     "            \"parts\": [\n"
+          #     "                {\n"
+          #     "                    \"text\": \"what are the temperature, humidity and hours of growing lights needed for the next 24 hours for the following seeds planted %d days ago: roma tomatoes, spinach, basil and bell pepper.\"\n"
+          #     "                }\n"
+          #     "            ]\n"
+          #     "        }\n"
+          #     "    ],\n"
+          #     "    \"system_instruction\": {\n"
+          #     "        \"role\": \"user\",\n"
+          #     "        \"parts\": [\n"
+          #     "            {\n"
+          #     "                \"text\": \"You are a plant expert, you know everything about what are the best conditions to have seeds sprouting. You are optimizing for the fastest and most successful growth. You return the results in json format, with fields that carry a single integer value that is optimal for all the plants when they are growing together in the same sprouting bed. You express the temperature in F, humidity in percentage and time for the growing lights in hours.\"\n"
+          #     "            }\n"
+          #     "        ]\n"
+          #     "    },\n"
+          #     "    \"generationConfig\": {\n"
+          #     "        \"maxOutputTokens\": 2048,\n"
+          #     "        \"temperature\": 1,\n"
+          #     "        \"topP\": 1\n"
+          #     "    },\n"
+          #     "    \"safetySettings\": [\n"
+          #     "        {\n"
+          #     "            \"category\": \"HARM_CATEGORY_HATE_SPEECH\",\n"
+          #     "            \"threshold\": \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+          #     "        },\n"
+          #     "        {\n"
+          #     "            \"category\": \"HARM_CATEGORY_DANGEROUS_CONTENT\",\n"
+          #     "            \"threshold\": \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+          #     "        },\n"
+          #     "        {\n"
+          #     "            \"category\": \"HARM_CATEGORY_SEXUALLY_EXPLICIT\",\n"
+          #     "            \"threshold\": \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+          #     "        },\n"
+          #     "        {\n"
+          #     "            \"category\": \"HARM_CATEGORY_HARASSMENT\",\n"
+          #     "            \"threshold\": \"BLOCK_MEDIUM_AND_ABOVE\"\n"
+          #     "        }\n"
+          #     "    ]\n"
+          #     "}";
+          #     //char buffer[1024];
+
+          #     //return sprintf(request_string, id(ha_days_growing).state);
+          #     return request_string;
+          on_response:
+            then:
+              - logger.log:
+                  format: 'Response status: %d, Duration: %u ms'
+                  args:
+                    - status_code
+                    - duration_ms
+              - lambda: |-
+                  const char* httpResponse = id(http_request_data).get_string();
+                  ESP_LOGD("http_response", "Response %s", httpResponse);
+
+              #- lambda: |-
+              #  json::parse_json(id(gemini_request).get_string(), [](JsonObject root) {
+              #   id(player_volume).publish_state(root["vol"]);
+              #  });
+
+# From homeassistant
+sensor:
+  - platform: homeassistant
+    name: "Growing light hours"
+    entity_id: input_number.growing_lights_hours
+    id: ha_hours_of_light_required
+  - platform: homeassistant
+    name: "Days growing"
+    entity_id: counter.days_since_planting
+    id: ha_days_growing
+
+text_sensor:
+  - platform: homeassistant
+    entity_id: input_text.gcloud_token
+    id: ha_token
+
+
